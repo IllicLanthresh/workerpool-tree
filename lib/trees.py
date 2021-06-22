@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import typing
+from collections import defaultdict
 from functools import partial
 
 
@@ -29,7 +30,7 @@ class TreeWorkerPool(metaclass=SingletonMeta):
             self,
             callback: typing.Callable,
             operation: typing.Callable,
-            kwargs: typing.Dict[str, typing.Dict[str, typing.Union[str, int, float, bool, None]]] = None
+            kwargs: typing.Dict[str, typing.Union[str, int, float, bool, None]] = None
     ) -> multiprocessing.pool.AsyncResult:
         if not kwargs:
             kwargs = {}
@@ -61,13 +62,17 @@ class Node:
             childs = []
         if operation and value:
             raise RuntimeError("Either set a value or an operation, but not both")
+        if not value:
+            value = {}
         self.value: typing.Dict[str, typing.Union[str, int, float, bool, None]] = value
         self.operation: typing.Optional[typing.Callable] = operation
         self.childs: typing.Optional[typing.List[Node]] = childs
         self.parent: typing.Optional[Node] = parent
         for child in self.childs:
             child.parent = self
-        self.child_results: typing.Dict[str, typing.Dict[str, typing.Union[str, int, float, bool, None]]] = {}
+        self.child_results_by_pk: typing.Dict[
+            str, typing.Dict[str, typing.Union[str, int, float, bool, None]]
+        ] = defaultdict(dict)
         self.node_name = node_name
 
 
@@ -141,18 +146,20 @@ class TreeCalculator:
             worker_results: typing.List[multiprocessing.pool.AsyncResult] = []
             for node in level:
                 if type(node) == ValueNode:
-                    node.parent.child_results[node.node_name] = node.value
+                    for pk, value in node.value.items():
+                        node.parent.child_results_by_pk[pk][node.node_name] = value
                 elif type(node) == OperationNode:
-                    def handler(_node, _result):
-                        _node.value = _result
-                        if _node.parent:
-                            _node.parent.child_results[_node.node_name] = _result
+                    for pk, results_by_child_name in node.child_results_by_pk.items():
+                        def handler(_node, _pk, _result):
+                            _node.value[_pk] = _result
+                            if _node.parent:
+                                _node.parent.child_results_by_pk[_pk][_node.node_name] = _result
 
-                    worker_results.append(TreeWorkerPool().execute_async(
-                        partial(handler, node),
-                        node.operation,
-                        node.child_results
-                    ))
+                        worker_results.append(TreeWorkerPool().execute_async(
+                            partial(handler, node, pk),
+                            node.operation,
+                            results_by_child_name
+                        ))
             for r in worker_results:
                 r.wait()
 

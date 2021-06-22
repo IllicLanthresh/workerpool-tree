@@ -4,7 +4,7 @@ from lib import worker_functions
 
 tree_as_dict = {
     'name': 'modem_is_super_offline',
-    'operation': worker_functions.modem_offline_and_no_tracking,
+    'operation': worker_functions.modem_is_super_offline,
     'childs': [
         {
             'name': 'antenna_is_tracking',
