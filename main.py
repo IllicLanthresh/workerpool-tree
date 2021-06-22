@@ -1,4 +1,4 @@
-from lib.trees import TreeCalculator, create_tree_nodes
+from lib.trees import TreeCalculator, ValueNode, OperationNode
 from lib import worker_functions
 
 
@@ -24,6 +24,18 @@ tree_as_dict = {
         },
     ]
 }
+
+
+def create_tree_nodes(tree):
+    if 'value' in tree:
+        return ValueNode(tree['value'], tree['name'])
+    elif not tree.get('operation'):
+        raise RuntimeError(f'missing operation in tree: {tree}')
+
+    child_nodes = [create_tree_nodes(child) for child in tree['childs']]
+
+    return OperationNode(tree['operation'], child_nodes, tree['name'])
+
 
 if __name__ == '__main__':
     root_node = create_tree_nodes(tree_as_dict)

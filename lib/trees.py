@@ -164,14 +164,3 @@ class TreeCalculator:
                 r.wait()
 
         return self._root_node.value
-
-
-def create_tree_nodes(tree):
-    if 'value' in tree:
-        return ValueNode(tree['value'], tree['name'])
-    elif not tree.get('operation'):
-        raise RuntimeError(f'missing operation in tree: {tree}')
-
-    child_nodes = [create_tree_nodes(child) for child in tree['childs']]
-
-    return OperationNode(tree['operation'], child_nodes, tree['name'])
