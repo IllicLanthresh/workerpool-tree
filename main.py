@@ -3,25 +3,24 @@ from lib import worker_functions
 
 
 tree_as_dict = {
-    'operation': worker_functions.my_sum,
+    'name': 'modem_is_super_offline',
+    'operation': worker_functions.modem_offline_and_no_tracking,
     'childs': [
         {
-            'operation': worker_functions.fib_term,
-            'childs': [
-                {
-                    'value': 10000,
-                    'childs': []
-                }
-            ]
+            'name': 'antenna_is_tracking',
+            'value': {
+                'pk1': True,
+                'pk2': False
+            },
+            'childs': []
         },
         {
-            'operation': worker_functions.fib_term,
-            'childs': [
-                {
-                    'value': 500,
-                    'childs': []
-                }
-            ]
+            'name': 'is_modem_online',
+            'value': {
+                'pk1': True,
+                'pk2': False
+            },
+            'childs': []
         },
     ]
 }

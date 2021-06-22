@@ -29,14 +29,14 @@ class TreeWorkerPool(metaclass=SingletonMeta):
             self,
             callback: typing.Callable,
             operation: typing.Callable,
-            args: typing.List = None
+            kwargs: typing.Dict[str, typing.Dict[str, typing.Union[str, int, float, bool, None]]] = None
     ) -> multiprocessing.pool.AsyncResult:
-        if not args:
-            args = []
+        if not kwargs:
+            kwargs = {}
 
         def raise_exc(e):
             raise RuntimeError(f'An exception occurred in a pool thread: {e}')
-        return self._pool.apply_async(operation, args=args, callback=callback, error_callback=raise_exc)
+        return self._pool.apply_async(operation, args=[], kwds=kwargs, callback=callback, error_callback=raise_exc)
         
     def execute_and_wait(
             self,
@@ -51,8 +51,9 @@ class TreeWorkerPool(metaclass=SingletonMeta):
 class Node:
     def __init__(
             self,
+            node_name: str,
             operation: typing.Callable = None,
-            value: typing.Union[str, int, float, bool, None] = None,
+            value: typing.Dict[str, typing.Union[str, int, float, bool, None]] = None,
             childs: typing.List[Node] = None,
             parent: typing.Optional[Node] = None
     ):
@@ -60,22 +61,25 @@ class Node:
             childs = []
         if operation and value:
             raise RuntimeError("Either set a value or an operation, but not both")
-        self.value: typing.Union[str, int, float, bool, None] = value
+        self.value: typing.Dict[str, typing.Union[str, int, float, bool, None]] = value
         self.operation: typing.Optional[typing.Callable] = operation
         self.childs: typing.Optional[typing.List[Node]] = childs
         self.parent: typing.Optional[Node] = parent
         for child in self.childs:
             child.parent = self
-        self.child_results: typing.Dict[Node, typing.Union[str, int, float, bool, None]] = {}
+        self.child_results: typing.Dict[str, typing.Dict[str, typing.Union[str, int, float, bool, None]]] = {}
+        self.node_name = node_name
 
 
 class ValueNode(Node):
     def __init__(
             self,
-            value: typing.Union[str, int, float, bool, None],
+            value: typing.Dict[str, typing.Union[str, int, float, bool, None]],
+            node_name: str
     ):
         super(ValueNode, self).__init__(
             value=value,
+            node_name=node_name
         )
 
     def __repr__(self):
@@ -87,10 +91,12 @@ class OperationNode(Node):
             self,
             operation: typing.Callable,
             childs: typing.List[Node],
+            node_name: str
     ):
         super(OperationNode, self).__init__(
             operation=operation,
             childs=childs,
+            node_name=node_name
         )
 
     def __repr__(self):
@@ -135,19 +141,17 @@ class TreeCalculator:
             worker_results: typing.List[multiprocessing.pool.AsyncResult] = []
             for node in level:
                 if type(node) == ValueNode:
-                    node.parent.child_results[node] = node.value
+                    node.parent.child_results[node.node_name] = node.value
                 elif type(node) == OperationNode:
                     def handler(_node, _result):
                         _node.value = _result
                         if _node.parent:
-                            _node.parent.child_results[_node] = _result
+                            _node.parent.child_results[_node.node_name] = _result
 
                     worker_results.append(TreeWorkerPool().execute_async(
                         partial(handler, node),
                         node.operation,
-                        [
-                            v for v in node.child_results.values()
-                        ]
+                        node.child_results
                     ))
             for r in worker_results:
                 r.wait()
@@ -157,10 +161,10 @@ class TreeCalculator:
 
 def create_tree_nodes(tree):
     if 'value' in tree:
-        return ValueNode(tree['value'])
+        return ValueNode(tree['value'], tree['name'])
     elif not tree.get('operation'):
         raise RuntimeError(f'missing operation in tree: {tree}')
 
     child_nodes = [create_tree_nodes(child) for child in tree['childs']]
 
-    return OperationNode(tree['operation'], child_nodes)
+    return OperationNode(tree['operation'], child_nodes, tree['name'])
