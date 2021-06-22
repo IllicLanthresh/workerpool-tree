@@ -1,3 +1,5 @@
+import time
+
 from lib.trees import TreeCalculator, create_tree_nodes
 from lib import worker_functions
 
@@ -30,4 +32,7 @@ if __name__ == '__main__':
 
     calculator = TreeCalculator(root_node)
 
-    print(calculator.calculate_tree())
+    calculator.calculate_tree(print)
+
+    while True:
+        time.sleep(0.1)

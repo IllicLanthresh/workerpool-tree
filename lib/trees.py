@@ -30,14 +30,17 @@ class TreeWorkerPool(metaclass=SingletonMeta):
             self,
             callback: typing.Callable,
             operation: typing.Callable,
-            kwargs: typing.Dict[str, typing.Union[str, int, float, bool, None]] = None
+            args: typing.List = None,
+            kwargs: typing.Dict = None
     ) -> multiprocessing.pool.AsyncResult:
+        if not args:
+            args = []
         if not kwargs:
             kwargs = {}
 
         def raise_exc(e):
             raise RuntimeError(f'An exception occurred in a pool thread: {e}')
-        return self._pool.apply_async(operation, args=[], kwds=kwargs, callback=callback, error_callback=raise_exc)
+        return self._pool.apply_async(operation, args=args, kwds=kwargs, callback=callback, error_callback=raise_exc)
         
     def execute_and_wait(
             self,
@@ -116,13 +119,13 @@ class TreeCalculator:
     ):
         self._root_node: Node = root_node
         self._nodes_by_level: typing.Dict[int, typing.List[Node]] = {}
-        self._calculate_tree_levels()
+        self._calculate_nodes_in_levels()
 
-    def _calculate_tree_levels(self):
+    def _calculate_nodes_in_levels(self):
         self._nodes_by_level[0] = [self._root_node]
         current_level = 0
         while True:
-            level_childs = self._get_level_childs(self._nodes_by_level[current_level])
+            level_childs = self._get_childs_in_level(self._nodes_by_level[current_level])
             if level_childs:
                 self._nodes_by_level[current_level+1] = level_childs
                 current_level += 1
@@ -130,40 +133,64 @@ class TreeCalculator:
                 break
 
     @staticmethod
-    def _get_level_childs(level: typing.List[Node]):
+    def _get_childs_in_level(level: typing.List[Node]):
         return [
             child for node in level for child in node.childs
         ]
 
-    def calculate_tree(self):
-        levels: typing.List[typing.List[Node]] = [
+    def calculate_tree(self, callback):
+        ordered_level_nodes: typing.List[typing.List[Node]] = [
             level_nodes
             for level, level_nodes in
             sorted(self._nodes_by_level.items(), reverse=True, key=lambda kv: kv[0])
         ]
 
-        for level in levels:
+        level_nodes = ordered_level_nodes[0]
+
+        def execute_level_workload(_ordered_level_nodes, next_level, final_callback, workload):
             worker_results: typing.List[multiprocessing.pool.AsyncResult] = []
-            for node in level:
+            for work in workload:
+                worker_results.append(TreeWorkerPool().execute_async(*work))
+            for result in worker_results:
+                result.wait()
+            for node in _ordered_level_nodes[next_level-1]:
                 if type(node) == ValueNode:
                     for pk, value in node.value.items():
                         node.parent.child_results_by_pk[pk][node.node_name] = value
-                elif type(node) == OperationNode:
-                    for pk, results_by_child_name in node.child_results_by_pk.items():
-                        def handler(_node, _pk, _result):
-                            _node.value[_pk] = _result
-                            if _node.parent:
-                                _node.parent.child_results_by_pk[_pk][_node.node_name] = _result
 
-                        worker_results.append(TreeWorkerPool().execute_async(
-                            partial(handler, node, pk),
-                            node.operation,
-                            results_by_child_name
-                        ))
-            for r in worker_results:
-                r.wait()
+            if next_level < len(_ordered_level_nodes):
+                TreeWorkerPool().execute_async(
+                    partial(execute_level_workload, ordered_level_nodes, next_level + 1, final_callback),
+                    self._calculate_level_workload,
+                    args=[_ordered_level_nodes[next_level]]
+                )
+            else:
+                final_callback(self._root_node.value)
 
-        return self._root_node.value
+        TreeWorkerPool().execute_async(
+            partial(execute_level_workload, ordered_level_nodes, 1, callback),
+            self._calculate_level_workload,
+            args=[level_nodes]
+        )
+
+    @staticmethod
+    def _calculate_level_workload(level_nodes):
+        async_workload = []
+        for node in level_nodes:
+            if type(node) == OperationNode:
+                for pk, results_by_child_name in node.child_results_by_pk.items():
+                    def handler(_node, _pk, _result):
+                        _node.value[_pk] = _result
+                        if _node.parent:
+                            _node.parent.child_results_by_pk[_pk][_node.node_name] = _result
+
+                    async_workload.append((
+                        partial(handler, node, pk),
+                        node.operation,
+                        [],
+                        results_by_child_name
+                    ))
+        return async_workload
 
 
 def create_tree_nodes(tree):
@@ -175,3 +202,7 @@ def create_tree_nodes(tree):
     child_nodes = [create_tree_nodes(child) for child in tree['childs']]
 
     return OperationNode(tree['operation'], child_nodes, tree['name'])
+
+
+def noop():
+    pass
